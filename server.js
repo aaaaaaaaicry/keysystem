@@ -2,63 +2,68 @@ const express = require("express");
 const fs = require("fs");
 
 const app = express();
-
-// 🔥 IMPORTANTE pro Render
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
+app.use(express.static("public"));
 
 const DB_FILE = "keys.json";
 const ADMIN_SECRET = "5151157";
 
 let keys = {};
 
-// ================== LOAD SAFE ==================
+// ================= DB =================
 function loadDB() {
     try {
         if (fs.existsSync(DB_FILE)) {
             const raw = fs.readFileSync(DB_FILE, "utf8");
             keys = raw ? JSON.parse(raw) : {};
         }
-    } catch (e) {
-        console.log("DB corrompido, resetando...");
+    } catch {
         keys = {};
     }
 }
 
 function saveDB() {
-    try {
-        fs.writeFileSync(DB_FILE, JSON.stringify(keys, null, 2));
-    } catch (e) {
-        console.log("Erro ao salvar DB:", e);
-    }
+    fs.writeFileSync(DB_FILE, JSON.stringify(keys, null, 2));
 }
 
 loadDB();
 
-// ================== ROOT ==================
+// ================= HOME =================
 app.get("/", (req, res) => {
-    res.send("Server online ✔");
+    res.send("Key System Online ✔");
 });
 
-// ================== TEST ==================
-app.get("/test", (req, res) => {
-    res.send("OK funcionando");
+// ================= VALIDATE (SEM HWID) =================
+app.get("/validate", (req, res) => {
+    const { key } = req.query;
+
+    if (!key) return res.json({ status: "error" });
+
+    const data = keys[key];
+
+    if (!data) return res.json({ status: "invalid" });
+
+    if (Date.now() > data.expire) {
+        return res.json({ status: "expired" });
+    }
+
+    return res.json({ status: "valid" });
 });
 
-// ================== GENERATE KEY ==================
+// ================= GENERATE =================
 app.post("/generate", (req, res) => {
     const { secret, days } = req.body;
 
     if (secret !== ADMIN_SECRET) {
-        return res.json({ status: "error", message: "unauthorized" });
+        return res.json({ status: "error", message: "no_permission" });
     }
 
     const key = Math.random().toString(36).substring(2, 10);
 
     keys[key] = {
-        expire: Date.now() + (Number(days || 1) * 86400000),
-        hwid: null
+        expire: Date.now() + (Number(days || 1) * 86400000)
     };
 
     saveDB();
@@ -69,39 +74,26 @@ app.post("/generate", (req, res) => {
     });
 });
 
-// ================== VALIDATE KEY ==================
-app.get("/validate", (req, res) => {
-    const { key, hwid } = req.query;
-
-    if (!key || !hwid) {
-        return res.json({ status: "error", message: "missing data" });
-    }
-
-    const data = keys[key];
-
-    if (!data) {
-        return res.json({ status: "invalid" });
-    }
-
-    if (Date.now() > data.expire) {
-        return res.json({ status: "expired" });
-    }
-
-    // bind HWID
-    if (!data.hwid) {
-        data.hwid = hwid;
-        saveDB();
-        return res.json({ status: "valid", bind: true });
-    }
-
-    if (data.hwid !== hwid) {
-        return res.json({ status: "hwid_mismatch" });
-    }
-
-    res.json({ status: "valid" });
+// ================= LIST KEYS =================
+app.get("/keys", (req, res) => {
+    res.json(keys);
 });
 
-// ================== START ==================
+// ================= DELETE KEY =================
+app.post("/delete", (req, res) => {
+    const { secret, key } = req.body;
+
+    if (secret !== ADMIN_SECRET) {
+        return res.json({ status: "no_permission" });
+    }
+
+    delete keys[key];
+    saveDB();
+
+    res.json({ status: "deleted" });
+});
+
+// ================= START =================
 app.listen(PORT, () => {
-    console.log("Server ON na porta", PORT);
+    console.log("Server ON:", PORT);
 });
